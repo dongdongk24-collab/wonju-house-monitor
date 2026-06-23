@@ -16,6 +16,7 @@ OUTPUT_FILE = ROOT / "public" / "listings.json"
 
 START_URL = "https://new.land.naver.com/complexes?ms=2ACykt,3zVYsY,14&a=APT:ABYG:JGC:PRE&e=RETAIL"
 API_URL = "https://new.land.naver.com/api/articles"
+API_PATH = "/api/articles"
 AUTH_URL = "https://new.land.naver.com/api/auth"
 CORTAR_NO = "5113000000"
 REAL_ESTATE_TYPES = "APT:OPST"
@@ -77,6 +78,26 @@ def matches_budget(listing: Listing) -> bool:
     )
 
 
+def build_params(page: int) -> dict[str, Any]:
+    return {
+        "cortarNo": CORTAR_NO,
+        "order": "rank",
+        "realEstateType": REAL_ESTATE_TYPES,
+        "tradeType": TRADE_TYPES,
+        "tag": "::::::::",
+        "rentPriceMin": 0,
+        "rentPriceMax": MAX_MONTHLY_RENT_MANWON,
+        "priceMin": 0,
+        "priceMax": MAX_DEPOSIT_MANWON,
+        "areaMin": 0,
+        "areaMax": 900000000,
+        "showArticle": "false",
+        "sameAddressGroup": "false",
+        "priceType": "RETAIL",
+        "page": page,
+    }
+
+
 def make_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
@@ -100,33 +121,33 @@ def make_session() -> requests.Session:
     return session
 
 
-def build_params(page: int) -> dict[str, Any]:
-    return {
-        "cortarNo": CORTAR_NO,
-        "order": "rank",
-        "realEstateType": REAL_ESTATE_TYPES,
-        "tradeType": TRADE_TYPES,
-        "tag": "::::::::",
-        "rentPriceMin": 0,
-        "rentPriceMax": MAX_MONTHLY_RENT_MANWON,
-        "priceMin": 0,
-        "priceMax": MAX_DEPOSIT_MANWON,
-        "areaMin": 0,
-        "areaMax": 900000000,
-        "showArticle": "false",
-        "sameAddressGroup": "false",
-        "priceType": "RETAIL",
-        "page": page,
-    }
-
-
-def fetch_page(session: requests.Session, page: int) -> dict[str, Any]:
+def fetch_page_direct(session: requests.Session, page: int) -> dict[str, Any]:
     response = session.get(API_URL, params=build_params(page), timeout=20)
     if response.status_code == 429:
-        query = urlencode(build_params(page))
-        raise RuntimeError(f"네이버가 직접 조회를 제한했습니다. HTTP 429: {API_URL}?{query}")
+        raise RuntimeError("HTTP 429")
     response.raise_for_status()
     return response.json()
+
+
+def fetch_page_in_browser(page_obj: Any, page_no: int) -> dict[str, Any]:
+    api_path = f"{API_PATH}?{urlencode(build_params(page_no))}"
+    result = page_obj.evaluate(
+        """
+        async (apiPath) => {
+          const response = await fetch(apiPath, {
+            headers: { accept: "application/json, text/plain, */*" },
+            credentials: "include"
+          });
+          return { status: response.status, text: await response.text() };
+        }
+        """,
+        api_path,
+    )
+    if result["status"] == 429:
+        raise RuntimeError("네이버가 GitHub Actions 브라우저 조회도 제한했습니다. HTTP 429")
+    if result["status"] >= 400:
+        raise RuntimeError(f"네이버 응답 오류: HTTP {result['status']} {result['text'][:200]}")
+    return json.loads(result["text"])
 
 
 def listing_from_article(article: dict[str, Any]) -> Listing:
@@ -149,12 +170,11 @@ def listing_from_article(article: dict[str, Any]) -> Listing:
     )
 
 
-def fetch_matching_listings() -> list[Listing]:
-    session = make_session()
+def listings_from_pages(fetcher: Any) -> list[Listing]:
     listings: list[Listing] = []
-    page = 1
+    page_no = 1
     while True:
-        payload = fetch_page(session, page)
+        payload = fetcher(page_no)
         articles = payload.get("articleList") or []
         if not articles:
             break
@@ -166,9 +186,46 @@ def fetch_matching_listings() -> list[Listing]:
 
         if not payload.get("isMoreData"):
             break
-        page += 1
+        page_no += 1
         time.sleep(0.8)
     return listings
+
+
+def fetch_matching_listings_direct() -> list[Listing]:
+    session = make_session()
+    return listings_from_pages(lambda page_no: fetch_page_direct(session, page_no))
+
+
+def fetch_matching_listings_browser() -> list[Listing]:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+        )
+        context = browser.new_context(
+            locale="ko-KR",
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+        )
+        page_obj = context.new_page()
+        page_obj.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
+        page_obj.wait_for_timeout(5000)
+        listings = listings_from_pages(lambda page_no: fetch_page_in_browser(page_obj, page_no))
+        browser.close()
+        return listings
+
+
+def fetch_matching_listings() -> list[Listing]:
+    try:
+        return fetch_matching_listings_direct()
+    except Exception as direct_error:
+        print(f"Direct fetch failed, trying browser fetch: {direct_error}", file=sys.stderr)
+        return fetch_matching_listings_browser()
 
 
 def write_payload(payload: dict[str, Any]) -> None:
