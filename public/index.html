@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>원주시 부동산 매물 모니터</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>원주시 매물 모니터</h1>
+        <p>아파트·오피스텔 전세 1.2억 이하, 반전세 월세 20만 이하</p>
+      </div>
+      <a class="naver-link" href="https://new.land.naver.com/complexes?ms=2ACykt,3zVYsY,14&a=APT:ABYG:JGC:PRE&e=RETAIL" target="_blank" rel="noreferrer">네이버 부동산 열기</a>
+    </header>
+
+    <main>
+      <section class="status-band">
+        <div>
+          <span class="label">상태</span>
+          <strong id="statusText">불러오는 중</strong>
+        </div>
+        <div>
+          <span class="label">전체</span>
+          <strong id="countText">-</strong>
+        </div>
+        <div>
+          <span class="label">갱신</span>
+          <strong id="checkedText">-</strong>
+        </div>
+        <div>
+          <span class="label">방식</span>
+          <strong>GitHub Actions</strong>
+        </div>
+      </section>
+
+      <section id="errorBox" class="error-box" hidden></section>
+
+      <section class="toolbar">
+        <label>
+          검색
+          <input id="searchInput" type="search" placeholder="단지명, 중개사, 가격" />
+        </label>
+        <label>
+          거래
+          <select id="tradeFilter">
+            <option value="">전체</option>
+            <option value="전세">전세</option>
+            <option value="월세">반전세/월세</option>
+          </select>
+        </label>
+      </section>
+
+      <section id="listings" class="listings" aria-live="polite"></section>
+      <section id="emptyState" class="empty-state" hidden>조건에 맞는 매물이 아직 없습니다.</section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
